@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>perfmodel explorer</title>
+<meta name="description" content="Interactive explorer for an analytical roofline + SRAM-aware performance and energy model of transformer LLM inference.">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f4f3f0;
+  --surface: #fcfcfb;
+  --border: #e4e3df;
+  --grid: #ebeae6;
+  --text: #0b0b0b;
+  --text-2: #52514e;
+  --text-3: #7a7974;
+  --neutral: #8a8984;
+  --s1: #2a78d6;   /* compute-bound / resident */
+  --s2: #eb6834;   /* memory-bound / spilled */
+  --s3: #1baf7a;
+  --accent-wash: rgba(42, 120, 214, 0.08);
+  --shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #121211;
+    --surface: #1a1a19;
+    --border: #2e2e2c;
+    --grid: #2a2a28;
+    --text: #f0efec;
+    --text-2: #c3c2b7;
+    --text-3: #9a998f;
+    --neutral: #8a8984;
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --accent-wash: rgba(57, 135, 229, 0.14);
+    --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #121211;
+  --surface: #1a1a19;
+  --border: #2e2e2c;
+  --grid: #2a2a28;
+  --text: #f0efec;
+  --text-2: #c3c2b7;
+  --text-3: #9a998f;
+  --neutral: #8a8984;
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  --accent-wash: rgba(57, 135, 229, 0.14);
+  --shadow: none;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--page);
+  color: var(--text);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1240px; margin: 0 auto; padding: 24px 16px 48px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px; margin-bottom: 4px; }
+h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+h1 span { color: var(--text-3); font-weight: 500; }
+.sub { color: var(--text-2); margin: 4px 0 18px; max-width: 820px; }
+a { color: var(--s1); }
+.links { display: flex; gap: 16px; font-size: 13px; }
+code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* controls */
+.controls {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: flex-end;
+  padding: 12px 14px; margin: 0 0 16px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
+}
+.ctl { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ctl > label, .ctl > .lbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); }
+select {
+  font: inherit; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 28px 6px 10px; min-width: 150px;
+}
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button {
+  font: inherit; font-size: 13px; color: var(--text-2); background: transparent; border: 0;
+  padding: 6px 12px; cursor: pointer; border-right: 1px solid var(--border);
+}
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent-wash); color: var(--text); font-weight: 600; }
+.slider { display: flex; align-items: center; gap: 10px; }
+.slider input[type=range] { width: 160px; accent-color: var(--s1); }
+.slider output { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 48px; }
+details.adv { flex-basis: 100%; border-top: 1px solid var(--border); padding-top: 8px; }
+details.adv summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
+.adv-row { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 10px; align-items: flex-end; }
+.adv-row .note { color: var(--text-3); font-size: 12px; max-width: 360px; }
+button.reset { font: inherit; font-size: 12px; color: var(--text-2); background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+
+/* KPI tiles */
+.kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow); }
+.kpi .k { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); }
+.kpi .v { font-size: 24px; font-weight: 650; letter-spacing: -0.02em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.kpi .d { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+.badge { display: inline-flex; align-items: center; gap: 6px; }
+.badge i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+.insight {
+  background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--s1);
+  border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; color: var(--text); box-shadow: var(--shadow);
+}
+.insight p { margin: 0; }
+.insight p + p { margin-top: 4px; color: var(--text-2); }
+
+/* cards */
+.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px 10px; box-shadow: var(--shadow); min-width: 0; }
+.card h2 { font-size: 14px; margin: 0; }
+.card .cap { color: var(--text-2); font-size: 12.5px; margin: 2px 0 8px; }
+.c7 { grid-column: span 7; } .c5 { grid-column: span 5; } .c6 { grid-column: span 6; } .c12 { grid-column: span 12; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-2); margin: 0 0 4px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.legend i.line { height: 2px; width: 14px; border-radius: 1px; }
+.chart { width: 100%; position: relative; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.axis text { fill: var(--text-2); font-size: 11px; }
+.axis path, .axis line { stroke: var(--border); }
+.gridline line { stroke: var(--grid); }
+.gridline path { display: none; }
+.ann { fill: var(--text-2); font-size: 11px; }
+.ann-strong { fill: var(--text); font-size: 11px; font-weight: 600; }
+.ann, .ann-strong { paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+.empty { color: var(--text-3); font-size: 13px; padding: 24px 0; text-align: center; }
+
+/* tooltip */
+.tip {
+  position: fixed; pointer-events: none; z-index: 20; opacity: 0; transition: opacity .08s;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.14);
+  max-width: 280px;
+}
+.tip .t { font-weight: 650; margin-bottom: 4px; }
+.tip .r { display: flex; justify-content: space-between; gap: 14px; }
+.tip .r b { font-variant-numeric: tabular-nums; }
+.tip .r span { color: var(--text-2); }
+
+/* table */
+details.tbl summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--text-3); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+.tbl-wrap { overflow-x: auto; }
+
+footer { color: var(--text-3); font-size: 12px; margin-top: 24px; line-height: 1.6; }
+footer p { margin: 0 0 6px; }
+
+@media (max-width: 1000px) {
+  .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .c7, .c5, .c6 { grid-column: span 12; }
+}
+@media (max-width: 620px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .controls { position: static; }
+  .slider input[type=range] { width: 120px; }
+  select { min-width: 0; width: 100%; }
+  .ctl { flex: 1 1 140px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>perfmodel <span>explorer</span></h1>
+    <div class="links">
+      <a href="https://github.com/sanamang/Analytical-Performance-Model-for-LLM-Inference">GitHub</a>
+      <a href="https://github.com/sanamang/Analytical-Performance-Model-for-LLM-Inference#how-the-model-works">How it works</a>
+    </div>
+  </header>
+  <p class="sub">An analytical roofline model of transformer inference that also accounts for on-chip SRAM. Pick a model and a chip, then move the sliders to see which operations are limited by compute and which by memory, and what that does to tokens/s and energy. Every number is precomputed by the Python package (<code>perfmodel export-explorer</code>). These are <b>predictions</b>: the pure roofline is an upper bound on throughput.</p>
+
+  <section class="controls" aria-label="Scenario">
+    <div class="ctl"><label for="model">Model</label><select id="model"></select></div>
+    <div class="ctl"><label for="chip">Chip</label><select id="chip"></select></div>
+    <div class="ctl"><span class="lbl" id="phase-l">Phase</span>
+      <div class="seg" id="phase" role="group" aria-labelledby="phase-l">
+        <button data-v="decode" aria-pressed="true">Decode</button><button data-v="prefill" aria-pressed="false">Prefill</button>
+      </div></div>
+    <div class="ctl"><span class="lbl" id="wb-l">Weights</span>
+      <div class="seg" id="wb" role="group" aria-labelledby="wb-l">
+        <button data-v="16" aria-pressed="true">16-bit</button><button data-v="8" aria-pressed="false">8-bit</button><button data-v="4" aria-pressed="false">4-bit</button>
+      </div></div>
+    <div class="ctl"><label for="batch">Batch size</label>
+      <div class="slider"><input id="batch" type="range" min="0" max="10" step="1" value="0"><output id="batch-o">1</output></div></div>
+    <div class="ctl"><label for="ctx" id="ctx-l">Context (cached tokens)</label>
+      <div class="slider"><input id="ctx" type="range" min="0" max="8" step="1" value="3"><output id="ctx-o">1024</output></div></div>
+    <details class="adv">
+      <summary>Realism knobs (default: pure roofline)</summary>
+      <div class="adv-row">
+        <div class="ctl"><label for="be">Bandwidth efficiency</label>
+          <div class="slider"><input id="be" type="range" min="30" max="100" step="5" value="100"><output id="be-o">100%</output></div></div>
+        <div class="ctl"><label for="ce">Compute efficiency</label>
+          <div class="slider"><input id="ce" type="range" min="30" max="100" step="5" value="100"><output id="ce-o">100%</output></div></div>
+        <div class="ctl"><label for="oh">Overhead per kernel</label>
+          <div class="slider"><input id="oh" type="range" min="0" max="40" step="1" value="0"><output id="oh-o">0 µs</output></div></div>
+        <p class="note">Real kernels reach ~80-90% of peak bandwidth. Framework launch overhead is ~5-30 µs per kernel in eager PyTorch and near 0 with CUDA graphs. These apply the same formula as <code>predict_step</code>.</p>
+        <button class="reset" id="reset">Reset to pure roofline</button>
+      </div>
+    </details>
+  </section>
+
+  <section class="kpis" aria-label="Headline numbers">
+    <div class="kpi"><div class="k">Throughput</div><div class="v" id="k-tps">–</div><div class="d" id="k-tps-d"></div></div>
+    <div class="kpi"><div class="k" id="k-lat-l">Latency per token</div><div class="v" id="k-lat">–</div><div class="d" id="k-lat-d"></div></div>
+    <div class="kpi"><div class="k">Energy per token</div><div class="v" id="k-e">–</div><div class="d">dynamic only, 45 nm constants</div></div>
+    <div class="kpi"><div class="k">Bottleneck</div><div class="v" id="k-b">–</div><div class="d" id="k-b-d"></div></div>
+    <div class="kpi"><div class="k">Data moved / step</div><div class="v" id="k-bytes">–</div><div class="d" id="k-bytes-d"></div></div>
+  </section>
+
+  <section class="insight" aria-live="polite"><p id="ins-1">Loading…</p><p id="ins-2"></p></section>
+
+  <section class="grid">
+    <div class="card c7">
+      <h2>Roofline: where each operation sits</h2>
+      <p class="cap">Each dot is one op type for the whole step. Left of the ridge an op waits on memory; right of it, on compute. Hover a dot for details.</p>
+      <div class="legend" id="leg-roof"></div>
+      <div class="chart" id="roof"></div>
+    </div>
+    <div class="card c5">
+      <h2>Where the time goes</h2>
+      <p class="cap">Share of step time per op, colored by what limits it.</p>
+      <div class="legend" id="leg-time"></div>
+      <div class="chart" id="time"></div>
+    </div>
+    <div class="card c6">
+      <h2 id="sweep-b-t">Throughput vs batch size</h2>
+      <p class="cap" id="sweep-b-c">At the current context. The ring marks your selection.</p>
+      <div class="chart" id="sweep-b"></div>
+    </div>
+    <div class="card c6">
+      <h2 id="sweep-c-t">Throughput vs context length</h2>
+      <p class="cap">At the current batch size. Longer context means more KV-cache bytes per token.</p>
+      <div class="chart" id="sweep-c"></div>
+    </div>
+    <div class="card c12">
+      <h2>Memory placement: what fits on chip</h2>
+      <p class="cap" id="place-cap"></p>
+      <div class="legend" id="leg-place"></div>
+      <div class="chart" id="place"></div>
+    </div>
+    <div class="card c12">
+      <details class="tbl"><summary>Per-op table (all values for the current scenario)</summary>
+        <div class="tbl-wrap"><table id="optable"></table></div>
+      </details>
+    </div>
+  </section>
+
+  <footer>
+    <p><b>What this is.</b> Precomputed outputs of the <code>perfmodel</code> Python package over a grid of models × chips × precision × batch × context. Time per op is <code>max(FLOPs / peak, bytes / bandwidth)</code> with SRAM and DRAM as separate ceilings. Energy uses approximate Horowitz (ISSCC 2014, 45 nm) constants and leaves out static power, so read energy as relative.</p>
+    <p><b>Caveats.</b> SRAM-X is a <b>hypothetical</b> design point, not a product. GPU L2 is treated as a cache, so nothing is assumed resident. Kernel overhead, overlap and framework effects are excluded unless you add them with the realism knobs. See the README's Limitations section.</p>
+  </footer>
+</div>
+<div class="tip" id="tip" role="tooltip"></div>
+
+<script>
+(() => {
+  "use strict";
+  const DATA = "data/";
+  const OP_LABEL = {
+    embedding: "Embedding lookup", attn_norm: "RMSNorm (attention)", qkv_proj: "QKV projection",
+    attn_scores: "Attention scores (QKᵀ)", attn_softmax: "Softmax", attn_output: "Attention output (PV)",
+    o_proj: "Output projection", residual_add: "Residual adds", mlp_norm: "RMSNorm (MLP)",
+    mlp_up: "MLP gate + up", mlp_act: "SiLU × up", mlp_down: "MLP down", final_norm: "Final norm",
+    lm_head: "LM head",
+  };
+  const TENSOR_LABEL = {
+    embed: "Embedding table", lm_head: "LM head", qkv: "QKV weights", o_proj: "O-proj weights",
+    mlp_up: "MLP gate/up weights", mlp_down: "MLP down weights", norms: "Norm weights",
+    kv_cache: "KV cache",
+  };
+  const GROUPS = {
+    weights: ["qkv_proj", "o_proj", "mlp_up", "mlp_down", "lm_head"],
+    attention: ["attn_scores", "attn_softmax", "attn_output"],
+  };
+
+  const state = { model: "llama3.2-1b", chip: "a100", phase: "decode", wb: 16, bi: 0, ci: 3,
+                  be: 1, ce: 1, oh: 0 };
+  let meta = null;
+  const cache = new Map();
+
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const $ = (id) => document.getElementById(id);
+
+  // ---------- formatting ----------
+  const fmtTime = (s) => s >= 1 ? `${s.toFixed(2)} s` : s >= 1e-3 ? `${(s * 1e3).toPrecision(3)} ms`
+    : `${(s * 1e6).toPrecision(3)} µs`;
+  const fmtBytes = (b) => b >= 1e9 ? `${(b / 1e9).toPrecision(3)} GB` : b >= 1e6 ? `${(b / 1e6).toPrecision(3)} MB`
+    : `${(b / 1e3).toPrecision(3)} kB`;
+  const fmtNum = (x) => x >= 1e6 ? `${(x / 1e6).toPrecision(3)}M` : x >= 1e4 ? `${Math.round(x / 1e3)}k`
+    : x >= 100 ? Math.round(x).toLocaleString() : x.toPrecision(3);
+  const fmtMiB = (m) => m >= 1024 ? `${+(m / 1024).toPrecision(3)} GiB` : m >= 100 ? `${Math.round(m)} MiB`
+    : m > 0 ? `${m.toPrecision(3)} MiB` : "0";
+  const fmtFlops = (f) => f >= 1e12 ? `${(f / 1e12).toPrecision(3)} TFLOP` : f >= 1e9 ? `${(f / 1e9).toPrecision(3)} GFLOP`
+    : `${(f / 1e6).toPrecision(3)} MFLOP`;
+
+  // ---------- tooltip (textContent only) ----------
+  const tip = $("tip");
+  function showTip(evt, title, rows) {
+    tip.replaceChildren();
+    const t = document.createElement("div"); t.className = "t"; t.textContent = title; tip.appendChild(t);
+    for (const [k, v] of rows) {
+      const r = document.createElement("div"); r.className = "r";
+      const a = document.createElement("span"); a.textContent = k;
+      const b = document.createElement("b"); b.textContent = v;
+      r.append(a, b); tip.appendChild(r);
+    }
+    const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+    let x = evt.clientX + pad, y = evt.clientY + pad;
+    if (x + w > window.innerWidth - 8) x = evt.clientX - w - pad;
+    if (y + h > window.innerHeight - 8) y = evt.clientY - h - pad;
+    tip.style.left = `${x}px`; tip.style.top = `${y}px`; tip.style.opacity = 1;
+  }
+  const hideTip = () => { tip.style.opacity = 0; };
+
+  // ---------- data ----------
+  async function load(model, chip) {
+    const key = `${model}__${chip}`;
+    if (!cache.has(key)) cache.set(key, fetch(`${DATA}${key}.json`).then((r) => {
+      if (!r.ok) throw new Error(`missing ${key}`); return r.json(); }));
+    return cache.get(key);
+  }
+  const batches = () => state.phase === "decode" ? meta.grid.batches : meta.grid.prefill_batches;
+  const contexts = () => meta.grid.contexts;
+
+  // Same formula as perfmodel.export.apply_knobs / predict_step.
+  function evaluate(d, phase, wb, b, c) {
+    const rec = d.points[`${phase}|${wb}|${b}|${c}`];
+    if (!rec) return null;
+    const ops = d.ops.map((name, i) => {
+      const tc = rec.tc[i] / state.ce, tm = rec.tm[i] / state.be;
+      const time = Math.max(tc, tm) + d.counts[i] * state.oh;
+      const bytes = rec.sb[i] + rec.db[i];
+      const bound = tc === 0 && tm === 0 ? "none" : tc > tm ? "compute" : tm > tc ? "memory" : "balanced";
+      return { name, kind: d.kinds[i], count: d.counts[i], time, tc, tm, bound, flops: rec.f[i],
+               sram: rec.sb[i], dram: rec.db[i], bytes, energy: rec.e[i],
+               intensity: bytes > 0 ? rec.f[i] / bytes : Infinity };
+    });
+    const time = d3.sum(ops, (o) => o.time);
+    const tokens = b * (phase === "decode" ? 1 : c);
+    return {
+      rec, ops, time, tokens, tps: tokens / time,
+      energy: d3.sum(ops, (o) => o.energy),
+      flops: d3.sum(ops, (o) => o.flops), dram: d3.sum(ops, (o) => o.dram), sram: d3.sum(ops, (o) => o.sram),
+      cfrac: d3.sum(ops.filter((o) => o.bound === "compute"), (o) => o.time) / time,
+    };
+  }
+
+  // ---------- chart scaffolding ----------
+  function frame(el, height, m = { t: 10, r: 16, b: 38, l: 56 }) {
+    const host = $(el); host.replaceChildren();
+    const W = Math.max(280, host.clientWidth), H = height;
+    const svg = d3.select(host).append("svg").attr("viewBox", `0 0 ${W} ${H}`).attr("height", H);
+    return { svg, W, H, m, iw: W - m.l - m.r, ih: H - m.t - m.b,
+             g: svg.append("g").attr("transform", `translate(${m.l},${m.t})`) };
+  }
+  function legend(el, items) {
+    const host = $(el); host.replaceChildren();
+    for (const [label, color, kind] of items) {
+      const s = document.createElement("span");
+      const i = document.createElement("i"); i.style.background = color; if (kind === "line") i.className = "line";
+      s.append(i, document.createTextNode(label)); host.appendChild(s);
+    }
+  }
+  const logTicks = (lo, hi) => {
+    const t = []; for (let e = Math.floor(Math.log10(lo)); e <= Math.ceil(Math.log10(hi)); e++) t.push(10 ** e);
+    return t.filter((v) => v >= lo * 0.999 && v <= hi * 1.001);
+  };
+  const sup = (v) => {
+    const e = Math.round(Math.log10(v));
+    return e >= -3 && e <= 4 ? (+v.toPrecision(1)).toLocaleString() : `1e${e}`;
+  };
+
+  // ---------- roofline ----------
+  function drawRoofline(ev, chip, model) {
+    const f = frame("roof", 360, { t: 14, r: 18, b: 40, l: 56 });
+    const { g, iw, ih } = f;
+    const dtype = model.compute_dtype;
+    const peak = chip.peak_tflops[dtype] * 1e12 * state.ce;
+    const vpeak = chip.peak_tflops[chip.vector_dtype] * 1e12 * state.ce;
+    const levels = [["DRAM", chip.dram_gbps * 1e9 * state.be]];
+    if (chip.sram_persistent) levels.unshift(["SRAM", chip.sram_gbps * 1e9 * state.be]);
+    const x = d3.scaleLog().domain([0.05, 2e4]).range([0, iw]);
+    const y = d3.scaleLog().domain([1e9, peak * 3]).range([ih, 0]).clamp(true);
+
+    g.append("g").attr("class", "gridline").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).tickValues(logTicks(0.1, 1e4)).tickSize(-ih).tickFormat(""));
+    g.append("g").attr("class", "gridline").call(d3.axisLeft(y).tickValues(logTicks(1e9, peak * 3)).tickSize(-iw).tickFormat(""));
+    g.append("g").attr("class", "axis").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).tickValues(logTicks(0.1, 1e4)).tickFormat(sup));
+    g.append("g").attr("class", "axis")
+      .call(d3.axisLeft(y).tickValues(logTicks(1e9, peak * 3)).tickFormat((v) => sup(v / 1e12)));
+    g.append("text").attr("class", "ann").attr("x", iw / 2).attr("y", ih + 34).attr("text-anchor", "middle")
+      .text("arithmetic intensity (FLOP per byte moved)");
+    g.append("text").attr("class", "ann").attr("transform", `translate(-42,${ih / 2}) rotate(-90)`)
+      .attr("text-anchor", "middle").text("attained TFLOP/s");
+
+    const xs = d3.range(0, 401).map((i) => 0.05 * (4e5) ** (i / 400));
+    for (const [name, bw] of levels) {
+      const line = d3.line().x((v) => x(v)).y((v) => y(Math.min(peak, v * bw)));
+      g.append("path").attr("d", line(xs)).attr("fill", "none").attr("stroke", css("--neutral")).attr("stroke-width", 1.6);
+      const ridge = peak / bw;
+      g.append("line").attr("x1", x(ridge)).attr("x2", x(ridge)).attr("y1", y(peak)).attr("y2", ih)
+        .attr("stroke", css("--grid")).attr("stroke-dasharray", "3 3");
+      g.append("text").attr("class", "ann").attr("x", x(ridge) + 4).attr("y", ih - 6).text(`${name} ridge ${Math.round(ridge)}`);
+    }
+    g.append("line").attr("x1", 0).attr("x2", iw).attr("y1", y(vpeak)).attr("y2", y(vpeak))
+      .attr("stroke", css("--neutral")).attr("stroke-dasharray", "2 3");
+    g.append("text").attr("class", "ann").attr("x", 4).attr("y", y(vpeak) - 5)
+      .text(`${chip.vector_dtype} vector peak ${(vpeak / 1e12).toPrecision(3)} TFLOP/s (norms, softmax)`);
+    g.append("text").attr("class", "ann").attr("x", iw).attr("y", y(peak) + 14).attr("text-anchor", "end")
+      .text(`${dtype} tensor peak ${(peak / 1e12).toPrecision(3)} TFLOP/s`);
+
+    const pts = ev.ops.filter((o) => o.flops > 0 && o.bytes > 0 && o.time > 0)
+      .map((o) => ({ ...o, perf: o.flops / o.time }));
+    const color = (o) => o.bound === "compute" ? css("--s1") : css("--s2");
+    const dots = g.append("g").selectAll("g").data(pts).join("g")
+      .attr("transform", (o) => `translate(${x(o.intensity)},${y(o.perf)})`)
+      .attr("tabindex", 0).attr("role", "img")
+      .attr("aria-label", (o) => `${OP_LABEL[o.name]}: ${o.bound}-bound`);
+    dots.append("circle").attr("r", 12).attr("fill", "transparent");
+    dots.append("circle").attr("r", 5.5).attr("fill", color).attr("stroke", css("--surface")).attr("stroke-width", 2);
+    const share = (o) => `${(100 * o.time / ev.time).toFixed(1)}%`;
+    const over = (evt, o) => showTip(evt, OP_LABEL[o.name], [
+      ["bound by", o.bound], ["intensity", `${o.intensity.toPrecision(3)} FLOP/B`],
+      ["attained", `${(o.perf / 1e12).toPrecision(3)} TFLOP/s`], ["time", fmtTime(o.time)],
+      ["share of step", share(o)], ["work", fmtFlops(o.flops)], ["bytes", fmtBytes(o.bytes)],
+    ]);
+    dots.on("pointermove", over).on("pointerleave", hideTip)
+      .on("focus", (evt, o) => { const r = evt.target.getBoundingClientRect(); over({ clientX: r.right, clientY: r.bottom }, o); })
+      .on("blur", hideTip);
+
+    // label the three biggest time consumers
+    const top = [...pts].sort((a, b) => b.time - a.time).slice(0, iw < 420 ? 1 : 3);
+    const placed = [];
+    for (const o of top) {
+      let px = x(o.intensity), py = y(o.perf) - 10;
+      while (placed.some(([qx, qy]) => Math.abs(qx - px) < 110 && Math.abs(qy - py) < 13)) py += 14;
+      placed.push([px, py]);
+      const anchor = px > iw - 130 ? "end" : "start";
+      g.append("text").attr("class", "ann-strong").attr("x", px + (anchor === "start" ? 9 : -9)).attr("y", py)
+        .attr("text-anchor", anchor).text(OP_LABEL[o.name]);
+    }
+    const bwText = levels.map(([n, bw]) => `${n} ${(bw / 1e12).toPrecision(3)} TB/s`).join(", ");
+    legend("leg-roof", [["compute-bound op", css("--s1")], ["memory-bound op", css("--s2")],
+                        [`ceilings (${bwText})`, css("--neutral"), "line"]]);
+  }
+
+  // ---------- time breakdown ----------
+  function drawTime(ev) {
+    const ops = ev.ops.filter((o) => o.time > 0).sort((a, b) => b.time - a.time);
+    const rowH = 22;
+    const f = frame("time", ops.length * rowH + 30, { t: 4, r: 54, b: 26, l: 150 });
+    const { g, iw, ih } = f;
+    const x = d3.scaleLinear().domain([0, d3.max(ops, (o) => o.time / ev.time) || 1]).nice().range([0, iw]);
+    const y = d3.scaleBand().domain(ops.map((o) => o.name)).range([0, ih]).padding(0.22);
+    g.append("g").attr("class", "gridline").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(4).tickSize(-ih).tickFormat(""));
+    g.append("g").attr("class", "axis").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).ticks(4).tickFormat(d3.format(".0%")));
+    g.append("g").attr("class", "axis").call(d3.axisLeft(y).tickSize(0).tickPadding(8).tickFormat((n) => OP_LABEL[n]))
+      .select(".domain").remove();
+    const color = (o) => o.bound === "compute" ? css("--s1") : css("--s2");
+    const rows = g.append("g").selectAll("g").data(ops).join("g").attr("transform", (o) => `translate(0,${y(o.name)})`);
+    rows.append("rect").attr("x", -150).attr("width", iw + 200).attr("height", y.bandwidth()).attr("fill", "transparent");
+    rows.append("rect").attr("width", (o) => Math.max(1, x(o.time / ev.time))).attr("height", y.bandwidth())
+      .attr("rx", 3).attr("fill", color);
+    rows.append("text").attr("class", "ann").attr("x", (o) => x(o.time / ev.time) + 6).attr("y", y.bandwidth() / 2)
+      .attr("dy", "0.35em").text((o) => `${(100 * o.time / ev.time).toFixed(1)}%`);
+    rows.on("pointermove", (evt, o) => showTip(evt, OP_LABEL[o.name], [
+      ["time", fmtTime(o.time)], ["share of step", `${(100 * o.time / ev.time).toFixed(1)}%`],
+      ["bound by", o.bound], ["instances / step", String(o.count)],
+      ["compute time", fmtTime(o.tc)], ["memory time", fmtTime(o.tm)],
+    ])).on("pointerleave", hideTip);
+    legend("leg-time", [["compute-bound", css("--s1")], ["memory-bound", css("--s2")]]);
+  }
+
+  // ---------- sweeps ----------
+  function drawSweep(el, pts, xKey, xLabel, current, flipAt) {
+    const f = frame(el, 250, { t: 12, r: 18, b: 40, l: 56 });
+    const { g, iw, ih } = f;
+    const valid = pts.filter((p) => p.ev);
+    if (!valid.length) { $(el).replaceChildren(Object.assign(document.createElement("div"), { className: "empty", textContent: "No data" })); return; }
+    const x = d3.scaleLog().base(2).domain(d3.extent(valid, (p) => p[xKey])).range([0, iw]);
+    const yv = valid.map((p) => p.ev.tps);
+    const y = d3.scaleLog().domain([d3.min(yv) / 1.6, d3.max(yv) * 1.6]).range([ih, 0]);
+    const xt = valid.map((p) => p[xKey]).filter((_, i, a) => a.length <= 9 || i % 2 === 0);
+    // decades if there are enough of them, else 1-2-5 steps, else 1..9 (thinned)
+    const [ylo, yhi] = y.domain();
+    const cands = (ms) => {
+      const out = [];
+      for (let e = Math.floor(Math.log10(ylo)); e <= Math.ceil(Math.log10(yhi)); e++)
+        for (const m of ms) { const v = m * 10 ** e; if (v >= ylo && v <= yhi) out.push(v); }
+      return out;
+    };
+    let yt = cands([1]);
+    if (yt.length < 3) yt = cands([1, 2, 5]);
+    if (yt.length < 3) yt = cands([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    while (yt.length > 6) yt = yt.filter((_, i) => i % 2 === 0);
+    g.append("g").attr("class", "gridline").attr("transform", `translate(0,${ih})`).call(d3.axisBottom(x).tickValues(xt).tickSize(-ih).tickFormat(""));
+    g.append("g").attr("class", "gridline").call(d3.axisLeft(y).tickValues(yt).tickSize(-iw).tickFormat(""));
+    g.append("g").attr("class", "axis").attr("transform", `translate(0,${ih})`)
+      .call(d3.axisBottom(x).tickValues(xt).tickFormat((v) => v >= 1024 ? `${v / 1024}k` : v));
+    g.append("g").attr("class", "axis").call(d3.axisLeft(y).tickValues(yt).tickFormat(fmtNum));
+    g.append("text").attr("class", "ann").attr("x", iw / 2).attr("y", ih + 34).attr("text-anchor", "middle").text(xLabel);
+    g.append("text").attr("class", "ann").attr("transform", `translate(-44,${ih / 2}) rotate(-90)`).attr("text-anchor", "middle").text("tokens / s");
+
+    if (flipAt) {
+      g.append("line").attr("x1", x(flipAt)).attr("x2", x(flipAt)).attr("y1", 0).attr("y2", ih)
+        .attr("stroke", css("--neutral")).attr("stroke-dasharray", "4 3");
+      const right = x(flipAt) > iw / 2;
+      g.append("text").attr("class", "ann").attr("x", x(flipAt) + (right ? -5 : 5)).attr("y", ih - 8)
+        .attr("text-anchor", right ? "end" : "start").text(iw < 420 ? `compute-bound ≥ B=${flipAt}` : `matmuls compute-bound from B=${flipAt}`);
+    }
+    const line = d3.line().x((p) => x(p[xKey])).y((p) => y(p.ev.tps));
+    g.append("path").attr("d", line(valid)).attr("fill", "none").attr("stroke", css("--s1")).attr("stroke-width", 2);
+    g.append("g").selectAll("circle").data(valid).join("circle").attr("cx", (p) => x(p[xKey])).attr("cy", (p) => y(p.ev.tps))
+      .attr("r", 3.5).attr("fill", css("--s1")).attr("stroke", css("--surface")).attr("stroke-width", 1.5);
+    const cur = valid.find((p) => p[xKey] === current);
+    if (cur) g.append("circle").attr("cx", x(cur[xKey])).attr("cy", y(cur.ev.tps)).attr("r", 8)
+      .attr("fill", "none").attr("stroke", css("--text")).attr("stroke-width", 1.6);
+
+    // crosshair snapping to nearest grid point
+    const hair = g.append("line").attr("y1", 0).attr("y2", ih).attr("stroke", css("--text-3")).attr("stroke-width", 1).style("opacity", 0);
+    g.append("rect").attr("width", iw).attr("height", ih).attr("fill", "transparent")
+      .on("pointermove", (evt) => {
+        const [mx] = d3.pointer(evt);
+        const p = valid.reduce((a, b) => Math.abs(x(b[xKey]) - mx) < Math.abs(x(a[xKey]) - mx) ? b : a);
+        hair.attr("x1", x(p[xKey])).attr("x2", x(p[xKey])).style("opacity", 1);
+        showTip(evt, `${xLabel}: ${p[xKey].toLocaleString()}`, [
+          ["throughput", `${fmtNum(p.ev.tps)} tok/s`], ["step time", fmtTime(p.ev.time)],
+          ["energy", `${(1e3 * p.ev.energy / p.ev.tokens).toPrecision(3)} mJ/token`],
+          ["compute-bound time", `${Math.round(100 * p.ev.cfrac)}%`],
+        ]);
+      })
+      .on("pointerleave", () => { hair.style("opacity", 0); hideTip(); });
+  }
+
+  // ---------- placement ----------
+  function drawPlacement(ev, chip) {
+    const rec = ev.rec;
+    const tensors = Object.keys(rec.res).map((t) => ({ t, res: rec.res[t], spill: rec.spill[t] }))
+      .filter((d) => d.res + d.spill > 0.01).sort((a, b) => (b.res + b.spill) - (a.res + a.spill));
+    const used = d3.sum(tensors, (d) => d.res) + rec.act;
+    const total = d3.sum(tensors, (d) => d.res + d.spill);
+    const spill = d3.sum(tensors, (d) => d.spill);
+    $("place-cap").textContent = chip.sram_persistent
+      ? `${chip.name}: ${fmtMiB(chip.sram_mib)} of software-managed SRAM. Placement policy is greedy (most bytes read per byte stored first). ` +
+        `Resident: ${fmtMiB(used)}${rec.act > 0 ? ` (incl. ${fmtMiB(rec.act)} activation buffer)` : ""}. ` +
+        (spill > 0.01 ? `${fmtMiB(spill)} doesn't fit and streams from DRAM every step.` : "Everything fits, so DRAM is idle during decode.")
+      : `${chip.name} has ${fmtMiB(chip.sram_mib)} of L2, but it is a hardware cache that streaming weights evict, so the model assumes nothing stays resident. ` +
+        `All ${fmtMiB(total)} of weights and KV cache are read from DRAM.`;
+
+    const rowH = 24;
+    const f = frame("place", tensors.length * rowH + 34, { t: 4, r: 90, b: 28, l: 150 });
+    const { g, iw, ih } = f;
+    const x = d3.scaleLinear().domain([0, d3.max(tensors, (d) => d.res + d.spill) * 1.02]).range([0, iw]);
+    const y = d3.scaleBand().domain(tensors.map((d) => d.t)).range([0, ih]).padding(0.25);
+    const maxT = x.domain()[1], nT = Math.max(2, Math.floor(iw / 85));
+    const step = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536]
+      .find((st) => maxT / st <= nT) || 65536;
+    const ticks = d3.range(0, maxT + 1e-9, step);
+    g.append("g").attr("class", "gridline").attr("transform", `translate(0,${ih})`).call(d3.axisBottom(x).tickValues(ticks).tickSize(-ih).tickFormat(""));
+    g.append("g").attr("class", "axis").attr("transform", `translate(0,${ih})`).call(d3.axisBottom(x).tickValues(ticks).tickFormat(fmtMiB));
+    g.append("g").attr("class", "axis").call(d3.axisLeft(y).tickSize(0).tickPadding(8).tickFormat((t) => TENSOR_LABEL[t] || t)).select(".domain").remove();
+    const rows = g.append("g").selectAll("g").data(tensors).join("g").attr("transform", (d) => `translate(0,${y(d.t)})`);
+    rows.append("rect").attr("x", -150).attr("width", iw + 240).attr("height", y.bandwidth()).attr("fill", "transparent");
+    rows.append("rect").attr("width", (d) => x(d.res)).attr("height", y.bandwidth()).attr("rx", 3).attr("fill", css("--s1"));
+    rows.append("rect").attr("x", (d) => x(d.res) + (d.res > 0 ? 2 : 0)).attr("width", (d) => Math.max(0, x(d.spill) - (d.res > 0 ? 2 : 0)))
+      .attr("height", y.bandwidth()).attr("rx", 3).attr("fill", css("--s2"));
+    rows.append("text").attr("class", "ann").attr("x", (d) => x(d.res + d.spill) + 6).attr("y", y.bandwidth() / 2).attr("dy", "0.35em")
+      .text((d) => fmtMiB(d.res + d.spill));
+    rows.on("pointermove", (evt, d) => showTip(evt, TENSOR_LABEL[d.t] || d.t, [
+      ["size", fmtMiB(d.res + d.spill)], ["in SRAM", fmtMiB(d.res)], ["from DRAM", fmtMiB(d.spill)],
+    ])).on("pointerleave", hideTip);
+    legend("leg-place", chip.sram_persistent
+      ? [["resident in SRAM", css("--s1")], ["streamed from DRAM", css("--s2")]]
+      : [["streamed from DRAM (no persistent SRAM)", css("--s2")]]);
+  }
+
+  // ---------- table ----------
+  function drawTable(ev) {
+    const t = $("optable"); t.replaceChildren();
+    const head = ["op", "count", "FLOPs", "SRAM bytes", "DRAM bytes", "FLOP/B", "time", "share", "bound", "energy"];
+    const tr = document.createElement("tr");
+    for (const h of head) { const th = document.createElement("th"); th.textContent = h; tr.appendChild(th); }
+    t.appendChild(tr);
+    for (const o of ev.ops) {
+      const r = document.createElement("tr");
+      const cells = [OP_LABEL[o.name], o.count, fmtFlops(o.flops || 0), o.sram ? fmtBytes(o.sram) : "0", o.dram ? fmtBytes(o.dram) : "0",
+        Number.isFinite(o.intensity) ? o.intensity.toPrecision(3) : "∞", fmtTime(o.time),
+        `${(100 * o.time / ev.time).toFixed(1)}%`, o.bound, `${(o.energy * 1e3).toPrecision(3)} mJ`];
+      for (const c of cells) { const td = document.createElement("td"); td.textContent = String(c); r.appendChild(td); }
+      t.appendChild(r);
+    }
+  }
+
+  // ---------- KPIs + insight ----------
+  function drawKpis(ev, chip, model) {
+    const dec = state.phase === "decode";
+    $("k-tps").textContent = `${fmtNum(ev.tps)} tok/s`;
+    $("k-tps-d").textContent = dec ? `${fmtNum(ev.tps / batchVal())} tok/s per sequence` : `${batchVal()} × ${ctxVal()} prompt tokens`;
+    $("k-lat-l").textContent = dec ? "Latency per token" : "Time to first token";
+    $("k-lat").textContent = fmtTime(ev.time);
+    $("k-lat-d").textContent = dec ? "one decode step" : "whole prompt";
+    $("k-e").textContent = `${(1e3 * ev.energy / ev.tokens).toPrecision(3)} mJ`;
+    const comp = ev.cfrac > 0.5;
+    // ops within 5% of the ridge: compute and memory time are effectively equal
+    const nearRidge = (o) => o.tc > 0 && o.tm > 0 && Math.max(o.tc, o.tm) / Math.min(o.tc, o.tm) < 1.05;
+    const balShare = d3.sum(ev.ops.filter(nearRidge), (o) => o.time) / ev.time;
+    const balanced = balShare > 0.5;
+    const b = $("k-b"); b.replaceChildren();
+    const badge = document.createElement("span"); badge.className = "badge";
+    const dot = document.createElement("i"); dot.style.background = comp ? css("--s1") : css("--s2");
+    if (balanced) dot.style.background = css("--neutral");
+    badge.append(dot, document.createTextNode(balanced ? "Balanced" : comp ? "Compute" : "Memory")); b.appendChild(badge);
+    $("k-b-d").textContent = balanced ? `${Math.round(100 * balShare)}% of time at the ridge`
+      : `${Math.round(100 * ev.cfrac)}% of time compute-bound`;
+    $("k-bytes").textContent = fmtBytes(ev.dram + ev.sram);
+    $("k-bytes-d").textContent = ev.sram > 0 ? `${Math.round(100 * ev.dram / (ev.dram + ev.sram))}% from DRAM, rest SRAM` : "all from DRAM";
+
+    const share = (names) => d3.sum(ev.ops.filter((o) => names.includes(o.name)), (o) => o.time) / ev.time;
+    const w = share(GROUPS.weights), a = share(GROUPS.attention);
+    const ohShare = state.oh > 0 ? d3.sum(ev.ops, (o) => o.count * state.oh) / ev.time : 0;
+    let s1, s2 = "";
+    if (balanced && ohShare <= 0.5) {
+      s1 = `Balanced: ${Math.round(100 * balShare)}% of step time is in ops sitting right at the ridge, where compute and memory take about the same time.`;
+      s2 = "Speeding up only memory or only compute buys almost nothing here. Both have to scale together.";
+    } else if (ohShare > 0.5) {
+      s1 = `Overhead-bound: ${Math.round(100 * ohShare)}% of the step is fixed per-kernel overhead, not hardware limits.`;
+      s2 = "This is what eager-mode frameworks look like at small batch. CUDA graphs or a fused serving engine would recover most of it.";
+    } else if (comp) {
+      s1 = `Compute-bound: ${Math.round(100 * ev.cfrac)}% of step time is limited by tensor-core throughput.`;
+      s2 = dec ? "Weights are amortized across the batch. Faster math (FP8/INT8 compute) helps here, and more bandwidth would not."
+               : "Prefill is matmul-heavy. Peak FLOP/s and how well the GEMMs reach it decide time to first token.";
+    } else {
+      s1 = `Memory-bound: ${Math.round(100 * (1 - ev.cfrac))}% of step time is spent waiting on memory, not math.`;
+      if (a > 0.5) s2 = `KV-cache reads dominate (${Math.round(100 * a)}% of time). Bigger batches won't help, since each sequence has its own cache. Shorter context, KV quantization or fewer KV heads will.`;
+      else if (w > 0.5) s2 = `Weight reads dominate (${Math.round(100 * w)}% of time). Larger batches reuse each weight read across more tokens, and lower weight precision moves fewer bytes.`;
+      else s2 = "Elementwise ops and activations make up a large share, which is typical of large prefill batches.";
+    }
+    if (chip.sram_persistent) {
+      const spill = d3.sum(Object.values(ev.rec.spill));
+      if (spill > 0.01) s2 += ` ${fmtMiB(spill)} spills out of SRAM, and the DRAM path sets the pace.`;
+      else s2 += " Everything is resident in SRAM.";
+    }
+    $("ins-1").textContent = s1; $("ins-2").textContent = s2;
+    document.querySelector(".insight").style.borderLeftColor = balanced ? css("--neutral") : comp ? css("--s1") : css("--s2");
+  }
+
+  // ---------- controls ----------
+  const batchVal = () => batches()[state.bi];
+  const ctxVal = () => contexts()[state.ci];
+  function syncControls() {
+    const bs = batches();
+    state.bi = Math.min(state.bi, bs.length - 1);
+    $("batch").max = bs.length - 1; $("batch").value = state.bi; $("batch-o").textContent = bs[state.bi];
+    $("ctx").max = contexts().length - 1; $("ctx").value = state.ci;
+    $("ctx-o").textContent = ctxVal().toLocaleString();
+    $("ctx-l").textContent = state.phase === "decode" ? "Context (cached tokens)" : "Prompt length";
+    for (const [id, v] of [["phase", state.phase], ["wb", String(state.wb)]])
+      for (const btn of $(id).querySelectorAll("button")) btn.setAttribute("aria-pressed", String(btn.dataset.v === v));
+    $("be-o").textContent = `${Math.round(state.be * 100)}%`; $("ce-o").textContent = `${Math.round(state.ce * 100)}%`;
+    $("oh-o").textContent = `${Math.round(state.oh * 1e6)} µs`;
+    $("sweep-b-t").textContent = state.phase === "decode" ? "Throughput vs batch size" : "Prefill throughput vs batch size";
+    $("sweep-c-t").textContent = state.phase === "decode" ? "Throughput vs context length" : "Prefill throughput vs prompt length";
+  }
+
+  let token = 0;
+  async function render() {
+    const my = ++token;
+    syncControls();
+    const d = await load(state.model, state.chip);
+    if (my !== token) return;
+    const chip = meta.chips[state.chip], model = meta.models[state.model];
+    const ev = evaluate(d, state.phase, state.wb, batchVal(), ctxVal());
+    if (!ev) return;
+    drawKpis(ev, chip, model);
+    drawRoofline(ev, chip, model);
+    drawTime(ev);
+    const bPts = batches().map((b) => ({ b, ev: evaluate(d, state.phase, state.wb, b, ctxVal()) }));
+    let flip = null;
+    if (state.phase === "decode") {
+      const i = d.ops.indexOf("mlp_up");
+      // first batch from which the MLP weight matmul stays compute-bound for every larger batch
+      for (let k = bPts.length - 1; k >= 0; k--) {
+        if (bPts[k].ev && bPts[k].ev.ops[i].bound === "compute") flip = bPts[k].b; else break;
+      }
+    }
+    drawSweep("sweep-b", bPts, "b", "batch size", batchVal(), flip);
+    const cPts = contexts().map((c) => ({ c, ev: evaluate(d, state.phase, state.wb, batchVal(), c) }));
+    drawSweep("sweep-c", cPts, "c", state.phase === "decode" ? "context length" : "prompt length", ctxVal(), null);
+    drawPlacement(ev, chip);
+    drawTable(ev);
+    try { history.replaceState(null, "", `#${new URLSearchParams({ m: state.model, c: state.chip, p: state.phase, w: state.wb, b: batchVal(), x: ctxVal() })}`); } catch (e) { /* ignore */ }
+  }
+
+  function readHash() {
+    try {
+      const q = new URLSearchParams(location.hash.slice(1));
+      if (q.get("m") in meta.models) state.model = q.get("m");
+      if (q.get("c") in meta.chips) state.chip = q.get("c");
+      if (["decode", "prefill"].includes(q.get("p"))) state.phase = q.get("p");
+      if (meta.grid.weight_bits.includes(+q.get("w"))) state.wb = +q.get("w");
+      const bi = batches().indexOf(+q.get("b")); if (bi >= 0) state.bi = bi;
+      const ci = contexts().indexOf(+q.get("x")); if (ci >= 0) state.ci = ci;
+    } catch (e) { /* ignore malformed hash */ }
+  }
+
+  async function init() {
+    meta = await fetch(`${DATA}meta.json`).then((r) => r.json());
+    const fill = (sel, obj, label) => {
+      for (const [k, v] of Object.entries(obj)) {
+        const o = document.createElement("option"); o.value = k; o.textContent = label(v); sel.appendChild(o);
+      }
+    };
+    fill($("model"), meta.models, (m) => `${m.name} (${m.params_b}B)`);
+    fill($("chip"), meta.chips, (c) => c.name.replace("NVIDIA ", ""));
+    readHash();
+    $("model").value = state.model; $("chip").value = state.chip;
+    $("model").addEventListener("change", (e) => { state.model = e.target.value; render(); });
+    $("chip").addEventListener("change", (e) => { state.chip = e.target.value; render(); });
+    for (const id of ["phase", "wb"]) $(id).addEventListener("click", (e) => {
+      const v = e.target.closest("button")?.dataset.v; if (!v) return;
+      if (id === "phase") {
+        const b = batchVal(); state.phase = v;
+        const bs = batches(); state.bi = d3.minIndex(bs, (x) => Math.abs(Math.log2(x) - Math.log2(b)));
+      } else state.wb = +v;
+      render();
+    });
+    $("batch").addEventListener("input", (e) => { state.bi = +e.target.value; render(); });
+    $("ctx").addEventListener("input", (e) => { state.ci = +e.target.value; render(); });
+    $("be").addEventListener("input", (e) => { state.be = e.target.value / 100; render(); });
+    $("ce").addEventListener("input", (e) => { state.ce = e.target.value / 100; render(); });
+    $("oh").addEventListener("input", (e) => { state.oh = e.target.value * 1e-6; render(); });
+    $("reset").addEventListener("click", () => {
+      state.be = state.ce = 1; state.oh = 0; $("be").value = 100; $("ce").value = 100; $("oh").value = 0; render();
+    });
+    let rt; new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(render, 120); }).observe(document.querySelector(".grid"));
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+    render();
+  }
+  init().catch((err) => { $("ins-1").textContent = `Could not load data: ${err.message}. Serve this folder over HTTP (e.g. python -m http.server).`; });
+})();
+</script>
+</body>
+</html>

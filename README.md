@@ -18,6 +18,10 @@ and the unit tests check them against hand-computed values.
 > nothing. To replace it with real data, run `bench/bench_decode.py` on a GPU
 > (see [Validating on a GPU](#validating-on-a-gpu)).
 
+**[Interactive explorer →](https://sanamang.github.io/Analytical-Performance-Model-for-LLM-Inference/)**
+Pick a model, chip, precision, batch and context, and see which operations
+are compute- or memory-bound, where the time goes, and what fits in SRAM.
+
 ---
 
 ## Problem
@@ -87,7 +91,7 @@ LPDDR5 energy) are marked in an `estimated:` list.
 
 ```bash
 uv sync                      # core + dev tools (pytest, ruff, matplotlib, jupyter)
-uv run pytest                # 52 tests
+uv run pytest                # 65 tests
 uv run perfmodel list
 ```
 
@@ -130,6 +134,24 @@ from perfmodel import load_model, load_chip, predict_step
 r = predict_step(load_model("llama3-8b").with_(weight_bits=4), load_chip("h100"),
                  batch=8, n_past=2048, n_new=1)
 r.tokens_per_s, r.energy_per_token_j, r.to_frame()
+```
+
+## Interactive explorer
+
+[![perfmodel explorer](docs/figures/explorer.png)](https://sanamang.github.io/Analytical-Performance-Model-for-LLM-Inference/)
+
+[`docs/index.html`](docs/index.html) is a static page (D3, no build step)
+served by GitHub Pages. It shows headline numbers, a plain-language verdict
+on the bottleneck, a live roofline with every op, a time breakdown,
+throughput-vs-batch and throughput-vs-context sweeps, the SRAM placement, and
+a per-op table. The page does no modelling itself: `perfmodel
+export-explorer` writes the predictions to `docs/data/*.json`. The optional
+realism knobs (bandwidth/compute efficiency, per-kernel overhead) apply the
+same formula as `predict_step`, and `tests/test_export.py` checks they agree.
+
+```bash
+uv run perfmodel export-explorer          # regenerate docs/data after changing configs
+cd docs && python -m http.server 8000     # preview at http://localhost:8000
 ```
 
 ## Validation
@@ -176,8 +198,9 @@ predictions: upper bounds on throughput, lower bounds on energy.
    with group-wise scales). The tied 128k-vocab embedding is 125 MiB of
    that, and each 2k-token sequence adds 64 MiB of KV.
 4. **SRAM capacity is a cliff, not a slope.** On SRAM-X, the 4-bit 1B model
-   fits and decodes at ≈ 150k tok/s at batch 1 (resident weights even make
-   batch-1 decode compute-bound). The 16-bit model spills more than half its bytes
+   fits and decodes at ≈ 150k tok/s at batch 1 (with resident 4-bit weights,
+   the matmuls sit exactly on the SRAM ridge at ≈ 4 FLOP/B, so compute and
+   memory time are balanced and speeding up only one of them barely helps). The 16-bit model spills more than half its bytes
    to DRAM and is *slower than an A100* (569 vs 813 tok/s). Batching can hurt
    too: at batch 64 the KV cache overflows SRAM and throughput drops ~5x.
    Llama 3 8B never fits, so SRAM-X is a worse 8B decoder than an A100 at
@@ -236,12 +259,12 @@ chip YAML, fix the bandwidth and pass `--perfmodel-chip`.
 ## Layout
 
 ```
-src/perfmodel/  specs.py ops.py roofline.py memory.py energy.py predict.py cli.py
+src/perfmodel/  specs.py ops.py roofline.py memory.py energy.py predict.py cli.py export.py
 configs/        chips/*.yaml  models/*.yaml   (sources and estimates noted inline)
 bench/          bench_decode.py (GPU), make_sample_data.py (synthetic), results/
 notebooks/      a_validation, b_roofline, c_design_study (+ build_notebooks.py)
 tests/          specs, ops, roofline, memory/energy, predict/CLI
-docs/figures/   plots written by the notebooks
+docs/           index.html (explorer), data/ (generated JSON), figures/ (plots)
 ```
 
 ## References

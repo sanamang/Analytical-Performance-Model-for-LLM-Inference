@@ -421,8 +421,10 @@ ps.save(fig, "roofline_sram_accel");
 """),
     md("""
 The ops have the same intensities in both cases. (At 4-bit a weight matmul does
-4 FLOP/B, and against 100 TB/s SRAM that already reaches the 400 TFLOP/s
-peak: **with resident weights, batch-1 decode is compute-bound.**) Placement only changes which
+≈ 4 FLOP/B, which is exactly SRAM-X's SRAM ridge (400 TFLOP/s ÷ 100 TB/s).
+**With resident weights, batch-1 decode is balanced:** compute and memory
+time are within 0.3% of each other, so a faster SRAM or faster math alone
+buys almost nothing. Both have to scale together.) Placement only changes which
 ceiling they sit under. Residency moves them up the 100 TB/s SRAM line, about
 120x above the 0.8 TB/s DRAM line. That gap is the whole argument for
 SRAM-heavy inference silicon, and it only holds while the model fits (see
