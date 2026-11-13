@@ -51,4 +51,5 @@ target-version = "py311"
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
+"src/perfmodel/cli.py" = ["B008"]  # typer.Option defaults are the Typer idiom
 "notebooks/*.ipynb" = ["E501", "E402"]
