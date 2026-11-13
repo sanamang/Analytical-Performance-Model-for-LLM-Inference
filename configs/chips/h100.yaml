@@ -1,0 +1,28 @@
+# NVIDIA H100 SXM5 80GB
+name: NVIDIA H100 SXM5 80GB
+sources:
+  - "NVIDIA H100 Tensor Core GPU datasheet (H100 SXM column). Datasheet tensor numbers are
+    quoted *with sparsity*; dense values below are half of those."
+  - "NVIDIA H100 Tensor Core GPU Architecture whitepaper (50 MB L2)"
+  - "Energy: Horowitz ISSCC 2014; HBM: O'Connor et al. MICRO 2017 (HBM2 figure reused for HBM3)"
+peak_tflops:
+  fp16: 989.5           # 1979 sparse / 2
+  bf16: 989.5
+  fp8: 1979             # 3958 sparse / 2
+  int8: 1979            # TOPS, 3958 sparse / 2
+  fp32: 67              # non-tensor FP32
+dram_gbps: 3350         # HBM3
+dram_gib: 80
+sram_mib: 50            # L2 cache
+sram_persistent: false
+sram_gbps: null
+sram_pj_per_byte: null
+energy_pj_per_flop:     # APPROXIMATE (Horowitz 45 nm)
+  fp16: 0.75
+  bf16: 0.75
+  fp8: 0.115            # ESTIMATE: no Horowitz entry; assumed equal to int8
+  int8: 0.115
+  fp32: 2.3
+dram_pj_per_byte: 31.2  # APPROXIMATE: HBM2 figure, HBM3 not separately cited
+static_power_w: 0.0
+estimated: [energy_pj_per_flop, dram_pj_per_byte]

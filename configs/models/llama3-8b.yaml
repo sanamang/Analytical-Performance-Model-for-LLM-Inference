@@ -1,0 +1,19 @@
+# Meta Llama 3 8B
+name: Llama-3-8B
+sources:
+  - "https://huggingface.co/meta-llama/Meta-Llama-3-8B/blob/main/config.json"
+n_layers: 32            # num_hidden_layers
+d_model: 4096           # hidden_size
+n_heads: 32             # num_attention_heads
+n_kv_heads: 8           # num_key_value_heads (GQA, group size 4)
+head_dim: 128
+d_ff: 14336             # intermediate_size (SwiGLU)
+vocab_size: 128256
+gated_mlp: true
+tie_embeddings: false   # tie_word_embeddings: false
+qkv_bias: false
+weight_bits: 16         # bf16 checkpoint
+kv_bits: 16
+act_bits: 16
+compute_dtype: bf16
+notes: "Parameter count from this config: 8.03e9 (matches Meta's published 8B)."

@@ -1,0 +1,19 @@
+# Meta Llama 3.2 1B
+name: Llama-3.2-1B
+sources:
+  - "https://huggingface.co/meta-llama/Llama-3.2-1B/blob/main/config.json"
+n_layers: 16
+d_model: 2048
+n_heads: 32
+n_kv_heads: 8
+head_dim: 64
+d_ff: 8192
+vocab_size: 128256
+gated_mlp: true
+tie_embeddings: true    # tie_word_embeddings: true
+qkv_bias: false
+weight_bits: 16
+kv_bits: 16
+act_bits: 16
+compute_dtype: bf16
+notes: "Parameter count from this config: 1.236e9 (Meta reports 1.23B)."

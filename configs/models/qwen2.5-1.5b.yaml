@@ -1,0 +1,19 @@
+# Qwen2.5 1.5B ("Qwen 1.5B" in the project brief)
+name: Qwen2.5-1.5B
+sources:
+  - "https://huggingface.co/Qwen/Qwen2.5-1.5B/blob/main/config.json"
+  - "Qwen2.5 Technical Report, arXiv:2412.15115 (Table 1: 1.54B total / 1.31B non-embedding)"
+n_layers: 28
+d_model: 1536
+n_heads: 12
+n_kv_heads: 2
+head_dim: 128
+d_ff: 8960
+vocab_size: 151936
+gated_mlp: true
+tie_embeddings: true
+qkv_bias: true          # Qwen2 architecture uses bias on q/k/v projections
+weight_bits: 16
+kv_bits: 16
+act_bits: 16
+compute_dtype: bf16

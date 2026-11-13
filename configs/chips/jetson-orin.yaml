@@ -1,0 +1,27 @@
+# NVIDIA Jetson AGX Orin 64GB (GPU only, MAXN power mode; DLAs excluded)
+name: NVIDIA Jetson AGX Orin 64GB
+sources:
+  - "NVIDIA Jetson AGX Orin Series datasheet / technical brief: Ampere GPU with 2048 CUDA
+    cores and 64 Tensor Cores, up to 1.3 GHz; GPU 170 sparse INT8 TOPS; 64 GB LPDDR5 at
+    204.8 GB/s."
+  - "Energy: Horowitz ISSCC 2014"
+peak_tflops:
+  int8: 85              # DERIVED: 170 sparse TOPS / 2 (dense)
+  fp16: 42.5            # DERIVED: half of dense INT8 (Ampere tensor-core ratio)
+  bf16: 42.5            # DERIVED: same as fp16
+  fp32: 5.32            # DERIVED: 2048 cores x 2 FLOP/FMA x 1.3 GHz
+dram_gbps: 204.8        # LPDDR5, 256-bit
+dram_gib: 64
+sram_mib: 4             # GPU L2 -- UNVERIFIED; unused because sram_persistent=false
+sram_persistent: false
+sram_gbps: null
+sram_pj_per_byte: null
+energy_pj_per_flop:
+  fp16: 0.75
+  bf16: 0.75
+  int8: 0.115
+  fp32: 2.3
+dram_pj_per_byte: 162.5 # ESTIMATE / UPPER BOUND: Horowitz DDR3 1.3 nJ per 64-bit access.
+                        # LPDDR5 is likely much lower; treat Orin energy as pessimistic.
+static_power_w: 0.0
+estimated: [peak_tflops, sram_mib, energy_pj_per_flop, dram_pj_per_byte]

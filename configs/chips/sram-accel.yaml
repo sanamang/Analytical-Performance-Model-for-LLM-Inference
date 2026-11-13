@@ -1,0 +1,29 @@
+# HYPOTHETICAL SRAM-heavy inference accelerator. NOT A REAL PRODUCT.
+# A design point for "what if the weights live on-chip?" studies. Every number is a
+# design assumption. For scale, Groq has published ~230 MB SRAM and ~80 TB/s on-die
+# bandwidth per chip with 188 TFLOP/s FP16 / 750 TOPS INT8; this point is larger.
+name: Hypothetical SRAM accelerator (SRAM-X)
+sources:
+  - "Hypothetical. Reference point for scale: Groq LPU/GroqChip public product material."
+  - "Energy: Horowitz ISSCC 2014 (SRAM: 32 KB bank read, 20 pJ / 64 bit)"
+peak_tflops:
+  fp16: 400
+  bf16: 400
+  int8: 800
+  fp8: 800
+  fp32: 25
+dram_gbps: 819.2        # 2 x HBM2e stacks @ 3.2 Gb/s/pin x 1024 bit = 409.6 GB/s each
+dram_gib: 32
+sram_mib: 1024          # 1 GiB on-die SRAM
+sram_persistent: true   # software-managed scratchpad
+sram_gbps: 100000       # 100 TB/s aggregate across banks
+sram_pj_per_byte: 2.5   # Horowitz 32 KB SRAM: 20 pJ / 8 B. Optimistic (local bank only)
+energy_pj_per_flop:
+  fp16: 0.75
+  bf16: 0.75
+  int8: 0.115
+  fp8: 0.115
+  fp32: 2.3
+dram_pj_per_byte: 31.2  # HBM2, O'Connor et al. MICRO 2017
+static_power_w: 0.0
+estimated: [all -- hypothetical design point]
