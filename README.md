@@ -32,12 +32,7 @@ exist yet, as long as you are honest about where it is wrong.
 
 ## How the model works
 
-```
-ModelSpec + ChipSpec ──► ops.py ──► memory.py ──► roofline.py + energy.py ──► predict.py / CLI
- (YAML)                  FLOPs &     SRAM / DRAM     time = max(compute,      per-op table,
-                         bytes per   placement per   memory); energy =        totals, sweeps
-                         operation   tensor          Σ FLOPs·e + bytes·e
-```
+![perfmodel pipeline: specs → op counts → SRAM/DRAM placement → roofline + energy → predictions, validated against GPU measurements](docs/figures/pipeline.svg)
 
 **1. Operation counts ([`ops.py`](src/perfmodel/ops.py)).** One forward step
 processes `T` new tokens per sequence for `B` sequences with `P` tokens
@@ -101,17 +96,23 @@ uv run perfmodel predict --model llama3.2-1b --chip a100 --batch 1 --context 102
 ```
 ```
 Llama-3.2-1B (1.24B params, W16/KV16/A16, bf16) on NVIDIA A100 SXM4 80GB
-
-=== DECODE  batch=1  context=1024 ===
-          op   kind  count GFLOP SRAM_MB DRAM_MB intensity time_us time_%   bound energy_mJ
-    qkv_proj matmul     16 0.201    0.00  201.49       1.0   98.82    8.0  memory     6.438
- attn_scores matmul     16 0.067    0.00   16.86       4.0    8.27    0.7  memory     0.576
-      mlp_up matmul     16 1.074    0.00 1074.33       1.0  526.89   42.8  memory    34.324
-     lm_head matmul      1 0.525    0.00  525.60       1.0  257.77   21.0  memory    16.793
-     ...
+DECODE  batch=1  context=1024
+ op             kind     count   GFLOP   SRAM_MB   DRAM_MB   intensity   time_us   time_%   share of step   bound     energy_mJ
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ...
+ qkv_proj       matmul      16   0.201      0.00    201.49         1.0     98.82      8.0   █               memory        6.438
+ attn_scores    matmul      16   0.067      0.00     16.86         4.0      8.27      0.7   ▏               memory        0.576
+ ...
+ mlp_up         matmul      16   1.074      0.00   1074.33         1.0    526.89     42.8   █████▏          memory       34.324
+ ...
+ lm_head        matmul       1   0.525      0.00    525.60         1.0    257.77     21.0   ██▌             memory       16.793
 per-token latency: 1.230 ms   throughput: 812.8 tok/s   energy: 80.221 mJ/token
-total: 2.61 GFLOP, 2.508 GB moved (2.508 GB DRAM), intensity 1.0 FLOP/B, 0% of time compute-bound
+total: 2.61 GFLOP, 2.508 GB moved (2.508 GB DRAM), intensity 1.0 FLOP/B, 0% of time compute-bound -> step is memory-bound, SRAM used 0.0 MiB
 ```
+
+In a terminal the table is colored by bound (blue = compute, orange =
+memory) and includes a bar for each op's share of step time. Piped output
+stays plain.
 
 Useful flags: `--weight-bits 4`, `--kv-bits 8`, `--placement kv_first`,
 `--unfused-attention`, `--overhead-us 10` (per-kernel launch cost). Chips and
@@ -160,6 +161,8 @@ predictions: upper bounds on throughput, lower bounds on energy.
 
 ![Roofline placement on A100](docs/figures/roofline_a100.png)
 
+![Where the time goes per operating point](docs/figures/time_breakdown.png)
+
 1. **Batch-1 decode is entirely bandwidth-bound.** Every weight matmul sits at
    1 FLOP/byte (bf16), 150x left of the A100 ridge. Llama 3.2 1B: 2.5 GB per
    token → ≈ 1.2 ms → ≈ 810 tok/s on A100.
@@ -179,6 +182,8 @@ predictions: upper bounds on throughput, lower bounds on energy.
    too: at batch 64 the KV cache overflows SRAM and throughput drops ~5x.
    Llama 3 8B never fits, so SRAM-X is a worse 8B decoder than an A100 at
    every precision.
+
+   ![SRAM-X placement by weight precision](docs/figures/sram_placement.png)
 5. **Weight quantization on a GPU at batch 1:** 16 → 8 → 4 bit gives ≈ 2.0x /
    3.8x tokens/s and ≈ 0.52x / 0.28x energy per token, since DRAM bytes
    dominate decode energy. The benefit shrinks with batch as KV traffic and

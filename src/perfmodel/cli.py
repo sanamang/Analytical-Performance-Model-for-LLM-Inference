@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pandas as pd
 import typer
+from rich import box
+from rich.console import Console
+from rich.table import Table
+from rich.text import Text
 
 from perfmodel.memory import POLICIES
 from perfmodel.predict import StepResult, predict, sweep
@@ -26,37 +29,88 @@ def _fmt_time(s: float) -> str:
     return f"{s * 1e3:.3f} ms" if s >= 1e-3 else f"{s * 1e6:.1f} us"
 
 
+BOUND_STYLE = {
+    "compute": "bold blue",
+    "memory": "dark_orange",
+    "balanced": "magenta",
+    "none": "dim",
+}
+
+
+def _console() -> Console:
+    c = Console()
+    # Piped / captured output: keep a wide, uncolored table instead of squeezing to 80 columns.
+    return c if c.is_terminal else Console(width=140, no_color=True)
+
+
+def _bar(frac: float, width: int = 12) -> str:
+    """Share of step time as a block bar, e.g. 0.43 -> '█████▏'."""
+    eighths = round(max(0.0, min(1.0, frac)) * width * 8)
+    full, rem = divmod(eighths, 8)
+    return "█" * full + ("" if rem == 0 else " ▏▎▍▌▋▊▉"[rem])
+
+
 def _print_step(r: StepResult, show_ops: bool) -> None:
+    con = _console()
     title = f"{r.phase.upper()}  batch={r.batch}  " + (
         f"prompt={r.n_new}" if r.phase == "prefill" else f"context={r.n_past}"
     )
-    typer.echo(f"\n=== {title} ===")
     if show_ops:
-        df = r.to_frame()
-        with pd.option_context("display.width", 200, "display.max_columns", 20):
-            typer.echo(
-                df.to_string(
-                    index=False,
-                    formatters={
-                        "GFLOP": "{:.3f}".format,
-                        "SRAM_MB": "{:.2f}".format,
-                        "DRAM_MB": "{:.2f}".format,
-                        "intensity": "{:.1f}".format,
-                        "time_us": "{:.2f}".format,
-                        "time_%": "{:.1f}".format,
-                        "energy_mJ": "{:.3f}".format,
-                    },
-                )
+        t = Table(
+            title=title,
+            title_justify="left",
+            title_style="bold",
+            header_style="bold",
+            box=box.SIMPLE_HEAD,
+            pad_edge=False,
+        )
+        for col, kw in [
+            ("op", {}),
+            ("kind", {"style": "dim"}),
+            ("count", {"justify": "right"}),
+            ("GFLOP", {"justify": "right"}),
+            ("SRAM_MB", {"justify": "right"}),
+            ("DRAM_MB", {"justify": "right"}),
+            ("intensity", {"justify": "right"}),
+            ("time_us", {"justify": "right"}),
+            ("time_%", {"justify": "right"}),
+            ("share of step", {}),
+            ("bound", {}),
+            ("energy_mJ", {"justify": "right"}),
+        ]:
+            t.add_column(col, **kw)
+        for row in r.to_frame().to_dict("records"):
+            style = BOUND_STYLE.get(row["bound"], "")
+            share = row["time_%"]
+            t.add_row(
+                row["op"],
+                row["kind"],
+                str(row["count"]),
+                f"{row['GFLOP']:.3f}",
+                f"{row['SRAM_MB']:.2f}",
+                f"{row['DRAM_MB']:.2f}",
+                f"{row['intensity']:.1f}",
+                f"{row['time_us']:.2f}",
+                f"{share:.1f}",
+                Text(_bar(share / 100), style=style),
+                Text(row["bound"], style=style),
+                f"{row['energy_mJ']:.3f}",
             )
+        con.print(t)
+    else:
+        con.print(f"\n[bold]{title}[/bold]")
     s = r.summary()
     label = "latency (TTFT)" if r.phase == "prefill" else "per-token latency"
-    typer.echo(
-        f"{label}: {_fmt_time(r.time_s)}   throughput: {r.tokens_per_s:,.1f} tok/s   "
-        f"energy: {r.energy_per_token_j * 1e3:.3f} mJ/token\n"
+    cb = s["compute_bound_fraction"]
+    verdict = "[bold blue]compute-bound[/]" if cb > 0.5 else "[dark_orange]memory-bound[/]"
+    con.print(
+        f"{label}: [bold]{_fmt_time(r.time_s)}[/]   throughput: [bold]{r.tokens_per_s:,.1f} "
+        f"tok/s[/]   energy: [bold]{r.energy_per_token_j * 1e3:.3f} mJ/token[/]\n"
         f"total: {s['gflop']:.2f} GFLOP, {s['gbytes']:.3f} GB moved "
         f"({s['dram_gbytes']:.3f} GB DRAM), intensity {s['intensity']:.1f} FLOP/B, "
-        f"{100 * s['compute_bound_fraction']:.0f}% of time compute-bound, "
-        f"SRAM used {s['sram_used_mib']:.1f} MiB"
+        f"{100 * cb:.0f}% of time compute-bound -> step is {verdict}, "
+        f"SRAM used {s['sram_used_mib']:.1f} MiB",
+        highlight=False,
     )
 
 

@@ -351,6 +351,57 @@ compute-bound. Attention does not move, because every sequence has its own
 KV cache, so batching never amortizes it. In prefill, the matmuls are far
 right of the ridge and the elementwise ops become the memory-bound tail.
 """),
+    md("""
+## Where the time goes
+
+The same model, five operating points. Ops are grouped by what limits them.
+At batch 1 the step is almost all weight streaming. Long context or large
+batch hands the step to attention (KV-cache reads). In prefill the weight
+matmuls are back on top, now compute-bound.
+"""),
+    code("""
+GROUPS = {
+    "weight matmuls": ["qkv_proj", "o_proj", "mlp_up", "mlp_down"],
+    "LM head": ["lm_head"],
+    "attention (KV reads)": ["attn_scores", "attn_softmax", "attn_output"],
+    "elementwise + embedding": ["embedding", "attn_norm", "mlp_norm", "residual_add",
+                                "mlp_act", "final_norm"],
+}
+cases = {
+    "decode  B=1    ctx 1k": predict_step(m, a100, 1, 1024, 1),
+    "decode  B=1    ctx 32k": predict_step(m, a100, 1, 32768, 1),
+    "decode  B=64   ctx 4k": predict_step(m, a100, 64, 4096, 1),
+    "decode  B=256  ctx 1k": predict_step(m, a100, 256, 1024, 1),
+    "prefill 2k tokens": predict_step(m, a100, 1, 0, 2048),
+}
+share = pd.DataFrame({
+    case: {g: sum(o.time for o in r.ops if o.name in ops) / r.time_s for g, ops in GROUPS.items()}
+    for case, r in cases.items()
+}).T
+
+fig, ax = plt.subplots(figsize=(9, 3.8))
+left = np.zeros(len(share))
+ys = np.arange(len(share))[::-1]
+for i, g in enumerate(share.columns):
+    v = share[g].values
+    ax.barh(ys, v, left=left, color=ps.SERIES[i], height=0.62, label=g,
+            edgecolor=ps.SURFACE, linewidth=2)
+    for y, x0, w in zip(ys, left, v):
+        if w >= 0.1:
+            ax.text(x0 + w / 2, y, f"{100 * w:.0f}%", ha="center", va="center", fontsize=8,
+                    color="white", fontweight="bold")
+    left += v
+for y, r in zip(ys, cases.values()):
+    ax.text(1.01, y, f"{r.tokens_per_s:,.0f} tok/s", va="center", fontsize=8, color=ps.INK_2)
+ax.set_yticks(ys, share.index, fontfamily="monospace", fontsize=9)
+ax.set(xlim=(0, 1), xlabel="share of step time")
+ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{100 * v:.0f}%"))
+ax.grid(axis="y", visible=False)
+ax.legend(ncols=4, loc="lower left", bbox_to_anchor=(0, 1.0), fontsize=8)
+ax.set_title("Where the time goes: Llama 3.2 1B (bf16) on A100", pad=28)
+ps.save(fig, "time_breakdown");
+share.round(3)
+"""),
     md("## SRAM-heavy design point: Llama 3.2 1B at 4-bit, decode batch 1, weights resident vs streamed"),
     code("""
 m4, sx = load_model("llama3.2-1b").with_(weight_bits=4), load_chip("sram-accel")
@@ -422,6 +473,47 @@ The KV cache adds 64 MiB per 2k-token sequence at 16-bit, so a 1 GiB SRAM
 holds the model plus a handful of 2k sequences. A 16-sequence 8k-token batch
 (4 GiB of KV) has to spill to DRAM or use KV quantization. Under 512 MiB the
 model doesn't fit, and decode falls back to DRAM speed.
+"""),
+    md("""
+### What actually lands in SRAM
+
+SRAM-X (1 GiB) running Llama 3.2 1B at batch 1 and context 2048, by weight
+precision. The greedy policy fills SRAM in order of bytes read per byte
+stored. Whatever doesn't fit is read from DRAM every step.
+"""),
+    code("""
+m1, sx = load_model("llama3.2-1b"), load_chip("sram-accel")
+rows = []
+for wb in [16, 8, 4]:
+    r = predict_step(m1.with_(weight_bits=wb), sx, 1, 2048, 1)
+    p = r.placement
+    resident = sum(p.footprint[t] * f for t, f in p.sram_fraction.items())
+    total = sum(p.footprint.values())
+    rows.append({"weights": f"{wb}-bit", "resident_MiB": resident / 2**20,
+                 "spilled_MiB": (total - resident) / 2**20,
+                 "act_buffer_MiB": p.activation_reserve / 2**20, "tok_s": r.tokens_per_s})
+place = pd.DataFrame(rows)
+
+fig, ax = plt.subplots(figsize=(9, 3))
+ys = np.arange(len(place))[::-1]
+ax.barh(ys, place.resident_MiB, color=ps.SERIES[0], height=0.6, label="resident in SRAM",
+        edgecolor=ps.SURFACE, linewidth=2)
+ax.barh(ys, place.spilled_MiB, left=place.resident_MiB, color=ps.SERIES[1], height=0.6,
+        label="spilled: streamed from DRAM each step", edgecolor=ps.SURFACE, linewidth=2)
+cap = sx.sram_bytes / 2**20
+xmax = place.eval("resident_MiB + spilled_MiB").max()
+ax.axvline(cap, color=ps.INK, lw=1.2, ls="--")
+ax.annotate(f"SRAM capacity {cap:.0f} MiB", (cap, ys[-1] - 0.55), xytext=(6, 0),
+            textcoords="offset points", fontsize=8, color=ps.INK, va="center")
+for y, row in zip(ys, place.itertuples()):
+    ax.text(xmax * 1.04, y, f"{row.tok_s:,.0f} tok/s", va="center", fontsize=9, color=ps.INK)
+ax.set_yticks(ys, place.weights)
+ax.set(xlabel="weights + KV cache (MiB)", xlim=(0, xmax * 1.2), ylim=(ys[-1] - 0.85, ys[0] + 0.5))
+ax.grid(axis="y", visible=False)
+ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncols=2, fontsize=8)
+ax.set_title("SRAM-X placement: Llama 3.2 1B, batch 1, ctx 2048", pad=24)
+ps.save(fig, "sram_placement");
+place.round(1)
 """),
     code("""
 # The SRAM cliff: tokens/s on SRAM-X as SRAM capacity grows (1B, 4-bit, batch 1, ctx 2048)
