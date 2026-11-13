@@ -1,0 +1,142 @@
+{
+ "models": {
+  "llama3-8b": {
+   "name": "Llama-3-8B",
+   "params_b": 8.03,
+   "layers": 32,
+   "d_model": 4096,
+   "heads": 32,
+   "kv_heads": 8,
+   "d_ff": 14336,
+   "vocab": 128256,
+   "compute_dtype": "bf16",
+   "tied": false
+  },
+  "llama3.2-1b": {
+   "name": "Llama-3.2-1B",
+   "params_b": 1.236,
+   "layers": 16,
+   "d_model": 2048,
+   "heads": 32,
+   "kv_heads": 8,
+   "d_ff": 8192,
+   "vocab": 128256,
+   "compute_dtype": "bf16",
+   "tied": true
+  },
+  "qwen2.5-1.5b": {
+   "name": "Qwen2.5-1.5B",
+   "params_b": 1.544,
+   "layers": 28,
+   "d_model": 1536,
+   "heads": 12,
+   "kv_heads": 2,
+   "d_ff": 8960,
+   "vocab": 151936,
+   "compute_dtype": "bf16",
+   "tied": true
+  }
+ },
+ "chips": {
+  "a100": {
+   "name": "NVIDIA A100 SXM4 80GB",
+   "peak_tflops": {
+    "fp16": 312,
+    "bf16": 312,
+    "int8": 624,
+    "fp32": 19.5
+   },
+   "vector_dtype": "fp32",
+   "dram_gbps": 2039,
+   "sram_gbps": null,
+   "sram_mib": 40,
+   "sram_persistent": false,
+   "hypothetical": false
+  },
+  "h100": {
+   "name": "NVIDIA H100 SXM5 80GB",
+   "peak_tflops": {
+    "fp16": 989.5,
+    "bf16": 989.5,
+    "fp8": 1979,
+    "int8": 1979,
+    "fp32": 67
+   },
+   "vector_dtype": "fp32",
+   "dram_gbps": 3350,
+   "sram_gbps": null,
+   "sram_mib": 50,
+   "sram_persistent": false,
+   "hypothetical": false
+  },
+  "jetson-orin": {
+   "name": "NVIDIA Jetson AGX Orin 64GB",
+   "peak_tflops": {
+    "int8": 85,
+    "fp16": 42.5,
+    "bf16": 42.5,
+    "fp32": 5.32
+   },
+   "vector_dtype": "fp32",
+   "dram_gbps": 204.8,
+   "sram_gbps": null,
+   "sram_mib": 4,
+   "sram_persistent": false,
+   "hypothetical": false
+  },
+  "sram-accel": {
+   "name": "Hypothetical SRAM accelerator (SRAM-X)",
+   "peak_tflops": {
+    "fp16": 400,
+    "bf16": 400,
+    "int8": 800,
+    "fp8": 800,
+    "fp32": 25
+   },
+   "vector_dtype": "fp32",
+   "dram_gbps": 819.2,
+   "sram_gbps": 100000,
+   "sram_mib": 1024,
+   "sram_persistent": true,
+   "hypothetical": true
+  }
+ },
+ "grid": {
+  "batches": [
+   1,
+   2,
+   4,
+   8,
+   16,
+   32,
+   64,
+   128,
+   256,
+   512,
+   1024
+  ],
+  "contexts": [
+   128,
+   256,
+   512,
+   1024,
+   2048,
+   4096,
+   8192,
+   16384,
+   32768
+  ],
+  "weight_bits": [
+   16,
+   8,
+   4
+  ],
+  "prefill_batches": [
+   1,
+   2,
+   4,
+   8,
+   16
+  ]
+ }
+}

@@ -180,6 +180,18 @@ def sweep_cmd(
     typer.echo(f"wrote {len(df)} rows to {out}")
 
 
+@app.command("export-explorer")
+def export_cmd(
+    out: Path = typer.Option(Path("docs/data"), "--out", "-o"),
+) -> None:
+    """Write the JSON grid used by the interactive explorer page (docs/index.html)."""
+    from perfmodel.export import build
+
+    paths = build(out)
+    size = sum(p.stat().st_size for p in paths) / 1e6
+    typer.echo(f"wrote {len(paths)} files ({size:.1f} MB) to {out}")
+
+
 @app.command("list")
 def list_cmd() -> None:
     """Show available model and chip configs."""
