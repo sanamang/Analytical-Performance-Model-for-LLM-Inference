@@ -52,4 +52,6 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/perfmodel/cli.py" = ["B008"]  # typer.Option defaults are the Typer idiom
-"notebooks/*.ipynb" = ["E501", "E402"]
+# Generated notebooks: trailing ";" suppresses plot output, setup cell imports compactly.
+"notebooks/*.ipynb" = ["E501", "E402", "E401", "E703", "I001", "F401", "B905"]
+"notebooks/build_notebooks.py" = ["E501"]  # embedded notebook cell source
