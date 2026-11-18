@@ -15,6 +15,30 @@ bandwidth and energy, and the rest streams from DRAM.
 
 ## How it works
 
+Running an LLM costs time, hardware and energy, and it is hard to know in
+advance how much. What happens if you quantize a model or batch more
+requests? Would it run fast enough? Instead of answering through trial and
+error, this project answers these questions on paper. It counts the math and
+data movement a model needs for each token, then combines that with a chip's
+peak compute and memory speed to estimate the speed and energy it can reach.
+
+For each operation in a transformer layer, the model computes FLOPs and bytes
+moved from the layer shapes. This is checked by 65 tests:
+
+- Parameter counts match the published model cards
+- Per-op FLOPs and bytes match hand-computed values on a toy model, for decode and prefill
+- Decode FLOPs per token is about 2 × parameters, within 1% at short context
+- GQA cuts KV-cache bytes, not FLOPs
+
+The model assumes an operation takes as long as its slowest resource, with
+math and data movement overlapping perfectly:
+
+$$
+t = \max\left(\frac{F}{P_{peak}},\ \frac{D_{SRAM}}{BW_{SRAM}},\ \frac{D_{DRAM}}{BW_{DRAM}}\right)
+$$
+
+This is a strict lower bound on time, so every result is a best case.
+
 1. **Count** ([`ops.py`](src/perfmodel/ops.py)): FLOPs and bytes for every op
    in a forward step (QKV, attention with GQA and causal masking, MLP, norms,
    LM head). It covers prefill, decode and speculative verification.
