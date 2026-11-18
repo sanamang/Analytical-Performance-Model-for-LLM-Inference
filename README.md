@@ -39,6 +39,8 @@ $$
 
 This is a strict lower bound on time, so every result is a best case.
 
+## The four steps
+
 1. **Count** ([`ops.py`](src/perfmodel/ops.py)): FLOPs and bytes for every op
    in a forward step (QKV, attention with GQA and causal masking, MLP, norms,
    LM head). It covers prefill, decode and speculative verification.
